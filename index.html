@@ -117,6 +117,7 @@ input.code{text-transform:uppercase;font-family:var(--mono);letter-spacing:.12em
 .mods-wrap{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:16px}
 .mods{display:flex;flex-direction:column;gap:12px;margin-top:10px;padding:12px 14px;border:1px solid var(--line);border-radius:4px;background:#12171c;max-width:520px}
 .mods label.chk{align-items:flex-start;line-height:1.4}.mods label.chk input{margin-top:2px;flex:none}
+.mono{font-family:var(--mono);font-size:12px}
 .pcode{font-family:var(--mono);font-size:13px;color:var(--dim);margin:8px 0 0}.pcode b{color:var(--accent);letter-spacing:.14em}
 </style>
 
@@ -142,7 +143,7 @@ input.code{text-transform:uppercase;font-family:var(--mono);letter-spacing:.12em
  <div class="panel">
   <div class="scr" id="scrMain">
    <h1>Breach <span>Point</span></h1>
-   <p class="sub">Tactical shooter · play with friends or bots, or sharpen your aim on the range</p>
+   <p class="sub">Tactical shooter · play with friends or bots, or sharpen your aim on the range · <span class="mono" id="ver"></span></p>
    <nav class="mainnav" aria-label="Main menu">
     <button class="btn mbig" data-go="play"><b>Play</b><span>Create or join a room · teams or free-for-all · bots</span></button>
     <button class="btn mbig" id="mTrain"><b>Training</b><span>Firing range with static and moving targets</span></button>
@@ -663,7 +664,7 @@ async function netJoin(code,host){if(NET.busy||NET.on||!NET.lobby)return;code=St
  const t0=performance.now();while(NET.on&&performance.now()-t0<25000&&!(NET.me&&NET.cfg&&(NET.host||(NET.hostPeer&&NET.hostPh))))await sleep(100);
  NET.busy=false;if(!NET.on)return;
  if(!NET.me){netLeave();setMsg("Couldn't reach the room. Check your connection and try again.",true);return}
- if(!NET.hostPeer){netLeave();setMsg("Couldn't find that room. Check the code, make sure the host is still in the room, and that you both refreshed the page recently.",true);return}
+ if(!NET.hostPeer){const dg=NET.diag?NET.diag():null;netLeave();setMsg(`Couldn't find that room. Check the code, make sure the host is still in the room, and that you both have version ${GAME_VERSION} (shown on the main menu; refresh if not).`+(dg?` Your connection: direct ${dg.direct?"ok":"blocked"}, relay servers ${dg.relay} of ${dg.total}.`:""),true);return}
  if(!NET.host&&NET.hostPh&&NET.hostPh!=="lobby"){netLeave();setMsg("That room's match has already started. You can join once it ends.",true);return}
  if(!NET.cfg)NET.cfg=cfgFromMenu();
  NET.inRoom=true;setMsg("");enterRoom();netSend()}
@@ -704,6 +705,7 @@ function syncMenu(){$("sensV").textContent=(+S.sens).toFixed(1);$("volV").textCo
 function showScr(n){$("menu").querySelector(".panel").style.width=n==="main"?"min(520px,100%)":"";for(const[id,k]of[["scrMain","main"],["scrPlay","play"],["scrSettings","settings"]])$(id).hidden=k!==n;const f=$(n==="main"?"scrMain":n==="play"?"scrPlay":"scrSettings").querySelector("button");if(f)f.focus({preventScroll:true});if(n==="play")renderOnline()}
 $("menu").addEventListener("click",e=>{const b=e.target.closest("[data-go]");if(b)showScr(b.dataset.go)});
 $("mTrain").onclick=startMatch;
+$("ver").textContent=GAME_VERSION;setInterval(()=>{if(state==="menu"&&!$("scrPlay").hidden)renderOnline()},1000);
 showScr("main");
 // without any network (e.g. inside claude.ai) rooms still work locally: you, alone, with bots
 function localLobby(){const me="local-"+Math.random().toString(36).slice(2,10);
@@ -724,18 +726,20 @@ async function relayServers(){if(!RELAY_ICE_URL)return null;try{const c=new Abor
  const list=(Array.isArray(j)?j:j.iceServers||[]).filter(x=>x&&x.urls&&[].concat(x.urls).some(u=>/^turns?:/.test(u)));return list.length?list:null}catch(e){console.warn("Relay unavailable:",e);return null}}
 // Fallback relay: public MQTT servers carry game data between players whose networks block direct
 // connections. The game connects to several at once, so one being down doesn't matter.
+const GAME_VERSION="v18";
 const MQTT_URLS=["wss://broker.hivemq.com:8884/mqtt","wss://broker.emqx.io:8084/mqtt","wss://test.mosquitto.org:8081/mqtt"];
 function loadScript(src){return new Promise((res,rej)=>{const e=document.createElement("script");e.src=src;e.onload=res;e.onerror=rej;document.head.append(e)})}
 async function mqttRelay(){try{if(!window.mqtt)await loadScript("https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.10.1/mqtt.min.js")}catch(e){return null}if(!window.mqtt||!mqtt.connect)return null;
  const subs=new Map(),clients=MQTT_URLS.map(u=>{let c;try{c=mqtt.connect(u,{clientId:"bp_"+Math.random().toString(36).slice(2,12),connectTimeout:8000,reconnectPeriod:5000,keepalive:30,clean:true})}catch(e){return null}
   c.on("connect",()=>{for(const t of subs.keys())c.subscribe(t)});c.on("message",(t,m)=>{const h=subs.get(t);if(!h)return;let o;try{o=JSON.parse(m.toString())}catch(e){return}h(o)});c.on("error",()=>{});return c}).filter(Boolean);
- return{up:()=>clients.some(c=>c.connected),sub(t,h){subs.set(t,h);for(const c of clients)if(c.connected)c.subscribe(t)},unsub(t){subs.delete(t);for(const c of clients)if(c.connected)c.unsubscribe(t)},
+ return{up:()=>clients.some(c=>c.connected),n:()=>clients.filter(c=>c.connected).length,total:MQTT_URLS.length,sub(t,h){subs.set(t,h);for(const c of clients)if(c.connected)c.subscribe(t)},unsub(t){subs.delete(t);for(const c of clients)if(c.connected)c.unsubscribe(t)},
   pub(t,o){const str=JSON.stringify(o);for(const c of clients)if(c.connected)c.publish(t,str)}}}
 async function p2pLobby(){const[mod,turn,MQ]=await Promise.all([import("https://cdn.jsdelivr.net/npm/@trystero-p2p/nostr@0.26.0/+esm").catch(()=>null),relayServers(),mqttRelay()]);NET.relay=!!turn;
  if(!mod&&!MQ)throw new Error("no transport");
  const cfg={appId:"breach-point-fps-v2",relayConfig:{urls:P2P_RELAYS,warnOnRelayFailure:false},...(turn?{turnConfig:turn}:{})},me=mod?mod.selfId:"m"+Math.random().toString(36).slice(2,14);
  const relaysUp=()=>{if(!mod)return false;try{const so=mod.getRelaySockets?mod.getRelaySockets():{};return Object.values(so).some(w=>w&&w.readyState===1)}catch(e){return true}};
  const up=()=>relaysUp()||!!(MQ&&MQ.up());
+ NET.diag=()=>({direct:relaysUp(),relay:MQ?MQ.n():0,total:MQTT_URLS.length});
  function mk(name){const room=mod?mod.joinRoom(cfg,name):null,act=room?room.makeAction("p"):{send(){}},peers=new Map(),subs=new Set(),p2p=new Set(),topic="breachpoint/v2/"+name;
   let mine={},snap=null,left=false,pend=false,sendT=null,q=0,lastMq=0;
   const peersNow=()=>{if(snap)return snap;const a=[{peer:me,by:null,isMe:true,sameTab:true,kind:"viewer",guest:false,presence:Object.freeze({...mine}),updatedAt:Date.now()}];for(const[id,p]of peers)a.push({peer:id,by:null,isMe:false,sameTab:false,kind:"viewer",guest:false,presence:p.presence,updatedAt:p.t});return snap=Object.freeze(a)};
@@ -766,7 +770,7 @@ function renderOnline(){const st=$("oStat");if(!st)return;
  if(!NET.lobby){st.textContent="Connecting…";st.className="ostat";$("oHost").disabled=$("oJoin").disabled=true;return}
  const local=NET.via==="local";$("oJoinBox").hidden=local;$("oJoinBox").style.display=local?"none":"contents";$("oNote").hidden=!local;
  if(local){st.textContent="Offline · rooms are just you and bots";st.className="ostat"}
- else{const lob=NET.lobby.peers().filter(p=>p.kind==="viewer"),c=NET.lobby.connected();st.textContent=c?`Online${NET.relay?" + relay":""} · ${lob.length} player${lob.length===1?"":"s"} here`:"Reconnecting…";st.className="ostat"+(c?" ok":"")}
+ else{const lob=NET.lobby.peers().filter(p=>p.kind==="viewer"),c=NET.lobby.connected();const dg=NET.diag?NET.diag():null;st.textContent=(c?`Online · ${lob.length} player${lob.length===1?"":"s"} here`:"Reconnecting…")+(dg?` · direct ${dg.direct?"ok":"blocked"} · relay ${dg.relay}/${dg.total}`:"")+" · "+GAME_VERSION;st.className="ostat"+(c?" ok":"")}
  $("oHost").disabled=NET.busy;$("oJoin").disabled=NET.busy||local}
 $("oName").value=S.name;$("oName").oninput=e=>{S.name=e.target.value.replace(/[\u0000-\u001f\u007f]/g,"").slice(0,16);saveCfg()};$("oName").onblur=e=>{if(!S.name.trim()){S.name="Operator-"+(100+rnd()*900|0);e.target.value=S.name;saveCfg()}};
 $("oHost").onclick=()=>{const code=Array.from({length:5},()=>"abcdefghjkmnpqrstuvwxyz23456789"[rnd()*31|0]).join("");netJoin(code,true)};
