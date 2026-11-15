@@ -717,8 +717,13 @@ function localLobby(){const me="local-"+Math.random().toString(36).slice(2,10);
 // Players find each other through public Nostr relays (Trystero), then talk directly over WebRTC.
 // It exposes the same calls the game uses from claude.ai's room capability, so the netcode is unchanged.
 const P2P_RELAYS=["wss://nos.lol","wss://relay.primal.net","wss://relay.damus.io","wss://nostr.mom"];
-async function p2pLobby(){const mod=await import("https://cdn.jsdelivr.net/npm/@trystero-p2p/nostr@0.26.0/+esm");
- const cfg={appId:"breach-point-fps-PdR1yU9izWmJ",relayConfig:{urls:P2P_RELAYS,warnOnRelayFailure:false}},me=mod.selfId;
+// Relay (TURN) for players whose networks block direct connections. Paste the Metered "TURN credentials"
+// address here (https://YOURAPP.metered.live/api/v1/turn/credentials?apiKey=...). Empty = direct connections only.
+const RELAY_ICE_URL="";
+async function relayServers(){if(!RELAY_ICE_URL)return null;try{const c=new AbortController(),t=setTimeout(()=>c.abort(),5000),r=await fetch(RELAY_ICE_URL,{signal:c.signal});clearTimeout(t);const j=await r.json();
+ const list=(Array.isArray(j)?j:j.iceServers||[]).filter(x=>x&&x.urls&&[].concat(x.urls).some(u=>/^turns?:/.test(u)));return list.length?list:null}catch(e){console.warn("Relay unavailable:",e);return null}}
+async function p2pLobby(){const[mod,turn]=await Promise.all([import("https://cdn.jsdelivr.net/npm/@trystero-p2p/nostr@0.26.0/+esm"),relayServers()]);NET.relay=!!turn;
+ const cfg={appId:"breach-point-fps-PdR1yU9izWmJ",relayConfig:{urls:P2P_RELAYS,warnOnRelayFailure:false},...(turn?{turnConfig:turn}:{})},me=mod.selfId;
  const relaysUp=()=>{try{const so=mod.getRelaySockets?mod.getRelaySockets():{};return Object.values(so).some(w=>w&&w.readyState===1)}catch(e){return true}};
  function mk(name){const room=mod.joinRoom(cfg,name),act=room.makeAction("p"),peers=new Map(),subs=new Set();let mine={},snap=null,left=false,pend=false,sendT=null;
   const peersNow=()=>{if(snap)return snap;const a=[{peer:me,by:null,isMe:true,sameTab:true,kind:"viewer",guest:false,presence:Object.freeze({...mine}),updatedAt:Date.now()}];for(const[id,p]of peers)a.push({peer:id,by:null,isMe:false,sameTab:false,kind:"viewer",guest:false,presence:p.presence,updatedAt:p.t});return snap=Object.freeze(a)};
@@ -743,7 +748,7 @@ function renderOnline(){const st=$("oStat");if(!st)return;
  if(!NET.lobby){st.textContent="Connecting…";st.className="ostat";$("oHost").disabled=$("oJoin").disabled=true;return}
  const local=NET.via==="local";$("oJoinBox").hidden=local;$("oJoinBox").style.display=local?"none":"contents";$("oNote").hidden=!local;
  if(local){st.textContent="Offline · rooms are just you and bots";st.className="ostat"}
- else{const lob=NET.lobby.peers().filter(p=>p.kind==="viewer"),c=NET.lobby.connected();st.textContent=c?`Online · ${lob.length} player${lob.length===1?"":"s"} here`:"Reconnecting…";st.className="ostat"+(c?" ok":"")}
+ else{const lob=NET.lobby.peers().filter(p=>p.kind==="viewer"),c=NET.lobby.connected();st.textContent=c?`Online${NET.relay?" + relay":""} · ${lob.length} player${lob.length===1?"":"s"} here`:"Reconnecting…";st.className="ostat"+(c?" ok":"")}
  $("oHost").disabled=NET.busy;$("oJoin").disabled=NET.busy||local}
 $("oName").value=S.name;$("oName").oninput=e=>{S.name=e.target.value.replace(/[\u0000-\u001f\u007f]/g,"").slice(0,16);saveCfg()};$("oName").onblur=e=>{if(!S.name.trim()){S.name="Operator-"+(100+rnd()*900|0);e.target.value=S.name;saveCfg()}};
 $("oHost").onclick=()=>{const code=Array.from({length:5},()=>"abcdefghjkmnpqrstuvwxyz23456789"[rnd()*31|0]).join("");netJoin(code,true)};
