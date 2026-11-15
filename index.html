@@ -663,7 +663,7 @@ async function netJoin(code,host){if(NET.busy||NET.on||!NET.lobby)return;code=St
  const t0=performance.now();while(NET.on&&performance.now()-t0<25000&&!(NET.me&&NET.cfg&&(NET.host||(NET.hostPeer&&NET.hostPh))))await sleep(100);
  NET.busy=false;if(!NET.on)return;
  if(!NET.me){netLeave();setMsg("Couldn't reach the room. Check your connection and try again.",true);return}
- if(!NET.hostPeer){netLeave();setMsg(NET.via==="p2p"?"Couldn't connect to that room. Check the code and that the host is still in the room, then refresh both pages and try again. If it keeps failing, one of your networks may be blocking direct connections between players (common on school or work Wi-Fi, mobile data, hotspots and VPNs).":"No room found with that code. Check the code and try again.",true);return}
+ if(!NET.hostPeer){netLeave();setMsg("Couldn't find that room. Check the code, make sure the host is still in the room, and that you both refreshed the page recently.",true);return}
  if(!NET.host&&NET.hostPh&&NET.hostPh!=="lobby"){netLeave();setMsg("That room's match has already started. You can join once it ends.",true);return}
  if(!NET.cfg)NET.cfg=cfgFromMenu();
  NET.inRoom=true;setMsg("");enterRoom();netSend()}
@@ -722,25 +722,43 @@ const P2P_RELAYS=["wss://nos.lol","wss://relay.primal.net","wss://relay.damus.io
 const RELAY_ICE_URL="";
 async function relayServers(){if(!RELAY_ICE_URL)return null;try{const c=new AbortController(),t=setTimeout(()=>c.abort(),5000),r=await fetch(RELAY_ICE_URL,{signal:c.signal});clearTimeout(t);const j=await r.json();
  const list=(Array.isArray(j)?j:j.iceServers||[]).filter(x=>x&&x.urls&&[].concat(x.urls).some(u=>/^turns?:/.test(u)));return list.length?list:null}catch(e){console.warn("Relay unavailable:",e);return null}}
-async function p2pLobby(){const[mod,turn]=await Promise.all([import("https://cdn.jsdelivr.net/npm/@trystero-p2p/nostr@0.26.0/+esm"),relayServers()]);NET.relay=!!turn;
- const cfg={appId:"breach-point-fps-PdR1yU9izWmJ",relayConfig:{urls:P2P_RELAYS,warnOnRelayFailure:false},...(turn?{turnConfig:turn}:{})},me=mod.selfId;
- const relaysUp=()=>{try{const so=mod.getRelaySockets?mod.getRelaySockets():{};return Object.values(so).some(w=>w&&w.readyState===1)}catch(e){return true}};
- function mk(name){const room=mod.joinRoom(cfg,name),act=room.makeAction("p"),peers=new Map(),subs=new Set();let mine={},snap=null,left=false,pend=false,sendT=null;
+// Fallback relay: public MQTT servers carry game data between players whose networks block direct
+// connections. The game connects to several at once, so one being down doesn't matter.
+const MQTT_URLS=["wss://broker.hivemq.com:8884/mqtt","wss://broker.emqx.io:8084/mqtt","wss://test.mosquitto.org:8081/mqtt"];
+function loadScript(src){return new Promise((res,rej)=>{const e=document.createElement("script");e.src=src;e.onload=res;e.onerror=rej;document.head.append(e)})}
+async function mqttRelay(){try{if(!window.mqtt)await loadScript("https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.10.1/mqtt.min.js")}catch(e){return null}if(!window.mqtt||!mqtt.connect)return null;
+ const subs=new Map(),clients=MQTT_URLS.map(u=>{let c;try{c=mqtt.connect(u,{clientId:"bp_"+Math.random().toString(36).slice(2,12),connectTimeout:8000,reconnectPeriod:5000,keepalive:30,clean:true})}catch(e){return null}
+  c.on("connect",()=>{for(const t of subs.keys())c.subscribe(t)});c.on("message",(t,m)=>{const h=subs.get(t);if(!h)return;let o;try{o=JSON.parse(m.toString())}catch(e){return}h(o)});c.on("error",()=>{});return c}).filter(Boolean);
+ return{up:()=>clients.some(c=>c.connected),sub(t,h){subs.set(t,h);for(const c of clients)if(c.connected)c.subscribe(t)},unsub(t){subs.delete(t);for(const c of clients)if(c.connected)c.unsubscribe(t)},
+  pub(t,o){const str=JSON.stringify(o);for(const c of clients)if(c.connected)c.publish(t,str)}}}
+async function p2pLobby(){const[mod,turn,MQ]=await Promise.all([import("https://cdn.jsdelivr.net/npm/@trystero-p2p/nostr@0.26.0/+esm").catch(()=>null),relayServers(),mqttRelay()]);NET.relay=!!turn;
+ if(!mod&&!MQ)throw new Error("no transport");
+ const cfg={appId:"breach-point-fps-v2",relayConfig:{urls:P2P_RELAYS,warnOnRelayFailure:false},...(turn?{turnConfig:turn}:{})},me=mod?mod.selfId:"m"+Math.random().toString(36).slice(2,14);
+ const relaysUp=()=>{if(!mod)return false;try{const so=mod.getRelaySockets?mod.getRelaySockets():{};return Object.values(so).some(w=>w&&w.readyState===1)}catch(e){return true}};
+ const up=()=>relaysUp()||!!(MQ&&MQ.up());
+ function mk(name){const room=mod?mod.joinRoom(cfg,name):null,act=room?room.makeAction("p"):{send(){}},peers=new Map(),subs=new Set(),p2p=new Set(),topic="breachpoint/v2/"+name;
+  let mine={},snap=null,left=false,pend=false,sendT=null,q=0,lastMq=0;
   const peersNow=()=>{if(snap)return snap;const a=[{peer:me,by:null,isMe:true,sameTab:true,kind:"viewer",guest:false,presence:Object.freeze({...mine}),updatedAt:Date.now()}];for(const[id,p]of peers)a.push({peer:id,by:null,isMe:false,sameTab:false,kind:"viewer",guest:false,presence:p.presence,updatedAt:p.t});return snap=Object.freeze(a)};
   const notify=()=>{snap=null;if(pend||left)return;pend=true;setTimeout(()=>{pend=false;if(left)return;const ps=peersNow();for(const f of subs)try{f({peers:ps,joined:[],left:[],updated:[]})}catch(e){console.error(e)}},0)};
-  const copy=()=>JSON.parse(JSON.stringify(mine)),flush=()=>{sendT=null;if(!left)try{act.send(copy())}catch(e){}};
-  act.onMessage=(d,{peerId})=>{if(left||!d||typeof d!=="object"||Array.isArray(d))return;peers.set(peerId,{presence:Object.freeze(d),t:Date.now()});notify()};
-  room.onPeerJoin=id=>{try{act.send(copy(),{target:id})}catch(e){}};
-  room.onPeerLeave=id=>{peers.delete(id);notify()};
-  const hb=setInterval(()=>{const n=Date.now();for(const[id,p]of peers)if(n-p.t>7000){peers.delete(id);notify()}flush()},2000);
-  return{name,peers:peersNow,connected:relaysUp,
+  const env=()=>({i:me,q:++q,d:JSON.parse(JSON.stringify(mine))});
+  // same message can arrive directly and through the relay: keep only the newest per player
+  const take=(id,o)=>{if(left||!o||typeof o!=="object"||typeof o.q!=="number")return;const cur=peers.get(id);
+   if(o.bye){if(peers.delete(id))notify();return}const d=o.d;if(!d||typeof d!=="object"||Array.isArray(d))return;if(cur&&o.q<=cur.q)return;
+   peers.set(id,{presence:Object.freeze(d),t:Date.now(),q:o.q});notify()};
+  const flush=()=>{sendT=null;if(left)return;const e=env();try{act.send(e)}catch(x){}
+   if(MQ){const n=Date.now(),need=[...peers.keys()].some(id=>!p2p.has(id)),gap=need?80:peers.size?2000:1000;if(n-lastMq>=gap){lastMq=n;MQ.pub(topic,e)}}};
+  act.onMessage=(o,{peerId})=>take(peerId,o);
+  if(MQ)MQ.sub(topic,o=>{if(!o||typeof o.i!=="string"||o.i===me||o.i.length>80)return;take(o.i,o)});
+  if(room){room.onPeerJoin=id=>{p2p.add(id);try{act.send(env(),{target:id})}catch(e){}};room.onPeerLeave=id=>{p2p.delete(id)}}
+  const hb=setInterval(()=>{const n=Date.now();for(const[id,p]of peers)if(n-p.t>7000){peers.delete(id);notify()}flush()},1000);
+  return{name,peers:peersNow,connected:up,
    presence(patch){for(const k in patch){if(patch[k]===null)delete mine[k];else mine[k]=patch[k]}if(!sendT)sendT=setTimeout(flush,30);notify();return Promise.resolve()},
-   onPeers(f){subs.add(f);notify();return()=>subs.delete(f)},onConnection(f){let last=null;const t=setInterval(()=>{const c=relaysUp();if(c!==last){last=c;f(c)}},1000);return()=>clearInterval(t)},
-   leave(){if(left)return Promise.resolve();left=true;clearInterval(hb);clearTimeout(sendT);try{room.leave()}catch(e){}return Promise.resolve()},
+   onPeers(f){subs.add(f);notify();return()=>subs.delete(f)},onConnection(f){let last=null;const t=setInterval(()=>{const c=up();if(c!==last){last=c;f(c)}},1000);return()=>clearInterval(t)},
+   leave(){if(left)return Promise.resolve();const bye={i:me,q:++q,bye:1};try{act.send(bye)}catch(e){}if(MQ){MQ.pub(topic,bye);MQ.unsub(topic)}left=true;clearInterval(hb);clearTimeout(sendT);try{room&&room.leave()}catch(e){}return Promise.resolve()},
    join:n=>Promise.resolve(mk(n))}}
  const lobby=mk("lobby"),t0=performance.now();
- while(!relaysUp()&&performance.now()-t0<9000)await sleep(250);
- if(!relaysUp()){lobby.leave();throw new Error("no relay reachable")}
+ while(!up()&&performance.now()-t0<10000)await sleep(250);
+ if(!up()){lobby.leave();throw new Error("no relay reachable")}
  return lobby}
 // ---------- online menu
 function setMsg(t,bad){const m=$("oMsg");m.textContent=t||"";m.className="omsg"+(bad?" bad":"")}
