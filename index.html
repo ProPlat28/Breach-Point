@@ -342,6 +342,7 @@ function newEnt(o){const e=Object.assign({hp:100,alive:true,kills:0,deaths:0,pos
 const S={mode:"tdm",map:"killhouse",diff:1,bots:7,botsB:3,botsR:4,pri:"m4",sec:"p12",skin:"matte",inf:true,sens:1,team:"blue",name:"",botDiff:1,vol:.8};
 try{Object.assign(S,JSON.parse(localStorage.getItem("bp_cfg")||"{}"))}catch(e){}
 if(!S.name)S.name="Operator-"+(100+rnd()*900|0);if(S.team!=="red")S.team="blue";
+const GAME_VERSION="v19";
 const saveCfg=()=>{try{localStorage.setItem("bp_cfg",JSON.stringify(S))}catch(e){}};
 // GM = rules of the match being played (menu settings offline, the host's settings online)
 const GM={mode:"tdm",diff:1};
@@ -726,7 +727,6 @@ async function relayServers(){if(!RELAY_ICE_URL)return null;try{const c=new Abor
  const list=(Array.isArray(j)?j:j.iceServers||[]).filter(x=>x&&x.urls&&[].concat(x.urls).some(u=>/^turns?:/.test(u)));return list.length?list:null}catch(e){console.warn("Relay unavailable:",e);return null}}
 // Fallback relay: public MQTT servers carry game data between players whose networks block direct
 // connections. The game connects to several at once, so one being down doesn't matter.
-const GAME_VERSION="v18";
 const MQTT_URLS=["wss://broker.hivemq.com:8884/mqtt","wss://broker.emqx.io:8084/mqtt","wss://test.mosquitto.org:8081/mqtt"];
 function loadScript(src){return new Promise((res,rej)=>{const e=document.createElement("script");e.src=src;e.onload=res;e.onerror=rej;document.head.append(e)})}
 async function mqttRelay(){try{if(!window.mqtt)await loadScript("https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.10.1/mqtt.min.js")}catch(e){return null}if(!window.mqtt||!mqtt.connect)return null;
