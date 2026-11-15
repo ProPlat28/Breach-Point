@@ -347,7 +347,7 @@ function newEnt(o){const e=Object.assign({hp:100,alive:true,kills:0,deaths:0,pos
 const S={mode:"tdm",map:"killhouse",diff:1,bots:7,botsB:3,botsR:4,pri:"m4",sec:"p12",skin:"matte",inf:true,sens:1,team:"blue",name:"",botDiff:1,vol:.8};
 try{Object.assign(S,JSON.parse(localStorage.getItem("bp_cfg")||"{}"))}catch(e){}
 if(!S.name)S.name="Operator-"+(100+rnd()*900|0);if(S.team!=="red")S.team="blue";
-const GAME_VERSION="v22";
+const GAME_VERSION="v23";
 const saveCfg=()=>{try{localStorage.setItem("bp_cfg",JSON.stringify(S))}catch(e){}};
 // GM = rules of the match being played (menu settings offline, the host's settings online)
 const GM={mode:"tdm",diff:1};
@@ -357,7 +357,7 @@ function clearEnts(){for(const e of ents){for(const h of e.hb)scene.remove(h);if
 function mkBot(i,team,diff){return newEnt({id:"b"+i,name:NAMES[i%NAMES.length],team,bot:true,diff,mesh:mkBotMesh(team),state:"patrol",path:[],pathT:0,aimErr:0,react:0,fireT:0,strafe:1,strafeT:0,mag:30,reloadT:0,coverT:0,target:null,mv:0})}
 function addBots(c){let i=0;if(GM.mode==="ffa"){for(let k=0;k<c.bf;k++)mkBot(i++,"ffa")}else{for(let k=0;k<c.bb;k++)mkBot(i++,"blue");for(let k=0;k<c.br;k++)mkBot(i++,"red")}}
 function armPlayer(){guns={pri:mkGunState(S.pri),sec:mkGunState(S.sec)};cur="pri";equip("pri",true)}
-function showHUD(){$("score").hidden=GM.mode!=="tdm";$("ffa").hidden=GM.mode!=="ffa";$("ffa").dataset.key="";$("train").hidden=GM.mode!=="range";$("code").hidden=!NET.on;$("code").textContent=NET.on?"ONLINE · MATCH "+NET.code.toUpperCase():"";$("hud").hidden=false;$("menu").hidden=true;$("over").hidden=true;$("pause").hidden=true}
+function showHUD(){$("score").hidden=GM.mode==="range";$("sb").hidden=$("sr").hidden=GM.mode==="ffa";$("ffa").hidden=GM.mode!=="ffa";$("ffa").dataset.key="";$("train").hidden=GM.mode!=="range";$("code").hidden=!NET.on;$("code").textContent=NET.on?"ONLINE · MATCH "+NET.code.toUpperCase():"";$("hud").hidden=false;$("menu").hidden=true;$("over").hidden=true;$("pause").hidden=true}
 function startMatch(){audio();saveCfg();GM.mode="range";GM.diff=S.diff;
  buildWorld(GM.mode==="range"?"range":S.map);clearEnts();fx.clear();
  player=newEnt({isPlayer:true,id:"me",name:"You",team:GM.mode==="ffa"?"ffa":"blue"});
@@ -525,7 +525,7 @@ function updateHUD(dt){const p=player,w=gun.w;$("hpnum").firstChild.nodeValue=Ma
  $("vig").style.opacity=Math.max(vig,p.hp<35?(35-p.hp)/60:0);
  if(GM.mode==="ffa"){const tl=Math.max(0,timeLeft),hc=hardcore(),rows=[...ents].sort((a,b)=>b.kills-a.kills||a.deaths-b.deaths).slice(0,12),
    head=hc?"HARDCORE":isFinite(tl)?Math.floor(tl/60)+":"+String(Math.floor(tl%60)).padStart(2,"0"):"∞",key=head+"|"+rows.map(e=>e.id+e.name+e.kills+(e.alive?1:0)).join(",");
-  const box=$("ffa");if(box.dataset.key!==key){box.dataset.key=key;box.innerHTML=`<div class="h"><span>KILLS</span><span>${head}</span></div>`+rows.map(e=>`<div class="r${e===p?" me":""}${hc&&!e.alive?" out":""}"><span>${esc(e.name)}${e===p?" (you)":""}</span><b>${e.kills}</b></div>`).join("")}}
+  $("st").textContent=head;const box=$("ffa");if(box.dataset.key!==key){box.dataset.key=key;box.innerHTML=`<div class="h"><span>KILLS</span></div>`+rows.map(e=>`<div class="r${e===p?" me":""}${hc&&!e.alive?" out":""}"><span>${esc(e.name)}${e===p?" (you)":""}</span><b>${e.kills}</b></div>`).join("")}}
  else if(GM.mode!=="range"&&hardcore()){const al=t=>ents.filter(e=>e.alive&&(t?e.team===t:true)).length;if(GM.mode==="tdm"){$("sb").textContent=al("blue");$("sr").textContent=al("red")}else{$("sb").textContent=p.alive?"ALIVE":"OUT";$("sr").textContent=al()}$("st").textContent="HARDCORE"}
  else if(GM.mode!=="range"){$("sb").textContent=GM.mode==="tdm"?score.blue:p.kills;const lead=GM.mode==="ffa"?Math.max(0,...ents.filter(e=>!e.isPlayer).map(e=>e.kills)):score.red;$("sr").textContent=lead;const tl=Math.max(0,timeLeft);$("st").textContent=isFinite(tl)?Math.floor(tl/60)+":"+String(Math.floor(tl%60)).padStart(2,"0"):"∞"}
  else $("train").innerHTML=`<b>FIRING RANGE</b><br>Shots <b>${trainStats.shots}</b> · Hits <b>${trainStats.hits}</b> · Accuracy <b>${trainStats.shots?Math.round(trainStats.hits/trainStats.shots*100):0}%</b><br>Last hit <b>${trainStats.last}</b><br>Infinite ammo <b>${S.inf?"ON":"OFF"}</b> · <kbd>I</kbd> toggle`;
