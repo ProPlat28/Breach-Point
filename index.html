@@ -52,6 +52,10 @@ label.chk input{width:16px;height:16px;accent-color:var(--accent)}
 #ammo{position:absolute;right:max(24px,env(safe-area-inset-right,0px));bottom:max(24px,env(safe-area-inset-bottom,0px));text-align:right}
 #ammo .n{font-size:58px;font-weight:800;line-height:.9;font-variant-numeric:tabular-nums}#ammo .r{font-size:24px;color:var(--dim)}#ammo .w{font-size:16px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
 #ammo .st{font-family:var(--mono);font-size:12px;color:#ffd590;letter-spacing:.1em;min-height:16px}
+#ffa{position:absolute;left:calc(max(18px,env(safe-area-inset-left,0px)) + 184px);top:max(18px,env(safe-area-inset-top,0px));min-width:170px;max-width:240px;background:rgba(10,14,18,.75);border-radius:3px;padding:6px 10px;font-family:var(--body);font-size:13px}
+#ffa .h{font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:var(--dim);display:flex;justify-content:space-between;gap:10px;margin-bottom:4px}
+#ffa .r{display:flex;justify-content:space-between;gap:12px;padding:2px 0}#ffa .r b{font-variant-numeric:tabular-nums;font-weight:700}#ffa .r.me{color:#ffd590}#ffa .r.out{opacity:.45;text-decoration:line-through}
+#ffa .r span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #radar{position:absolute;left:max(18px,env(safe-area-inset-left,0px));top:max(18px,env(safe-area-inset-top,0px));width:170px;height:170px;border-radius:50%;background:rgba(10,14,18,.65);border:1px solid rgba(255,255,255,.18)}
 #score{position:absolute;left:50%;top:max(14px,env(safe-area-inset-top,0px));transform:translateX(-50%);display:flex;gap:4px;align-items:stretch;font-weight:800}
 #score div{background:rgba(10,14,18,.75);padding:4px 14px;font-size:24px;font-variant-numeric:tabular-nums}
@@ -127,6 +131,7 @@ input.code{text-transform:uppercase;font-family:var(--mono);letter-spacing:.12em
  <canvas id="radar" width="170" height="170"></canvas>
  <div id="score"><div class="b" id="sb">0</div><div class="t" id="st">6:00</div><div class="r" id="sr">0</div></div>
  <div id="code" hidden></div>
+ <div id="ffa" hidden></div>
  <div id="feed"></div>
  <div id="train" hidden></div>
  <div id="xh"><i class="h" id="xl"></i><i class="h" id="xr"></i><i class="v" id="xu"></i><i class="v" id="xd"></i></div>
@@ -342,7 +347,7 @@ function newEnt(o){const e=Object.assign({hp:100,alive:true,kills:0,deaths:0,pos
 const S={mode:"tdm",map:"killhouse",diff:1,bots:7,botsB:3,botsR:4,pri:"m4",sec:"p12",skin:"matte",inf:true,sens:1,team:"blue",name:"",botDiff:1,vol:.8};
 try{Object.assign(S,JSON.parse(localStorage.getItem("bp_cfg")||"{}"))}catch(e){}
 if(!S.name)S.name="Operator-"+(100+rnd()*900|0);if(S.team!=="red")S.team="blue";
-const GAME_VERSION="v20";
+const GAME_VERSION="v21";
 const saveCfg=()=>{try{localStorage.setItem("bp_cfg",JSON.stringify(S))}catch(e){}};
 // GM = rules of the match being played (menu settings offline, the host's settings online)
 const GM={mode:"tdm",diff:1};
@@ -352,7 +357,7 @@ function clearEnts(){for(const e of ents){for(const h of e.hb)scene.remove(h);if
 function mkBot(i,team,diff){return newEnt({id:"b"+i,name:NAMES[i%NAMES.length],team,bot:true,diff,mesh:mkBotMesh(team),state:"patrol",path:[],pathT:0,aimErr:0,react:0,fireT:0,strafe:1,strafeT:0,mag:30,reloadT:0,coverT:0,target:null,mv:0})}
 function addBots(c){let i=0;if(GM.mode==="ffa"){for(let k=0;k<c.bf;k++)mkBot(i++,"ffa")}else{for(let k=0;k<c.bb;k++)mkBot(i++,"blue");for(let k=0;k<c.br;k++)mkBot(i++,"red")}}
 function armPlayer(){guns={pri:mkGunState(S.pri),sec:mkGunState(S.sec)};cur="pri";equip("pri",true)}
-function showHUD(){$("score").hidden=GM.mode==="range";$("train").hidden=GM.mode!=="range";$("code").hidden=!NET.on;$("code").textContent=NET.on?"ONLINE · MATCH "+NET.code.toUpperCase():"";$("hud").hidden=false;$("menu").hidden=true;$("over").hidden=true;$("pause").hidden=true}
+function showHUD(){$("score").hidden=GM.mode!=="tdm";$("ffa").hidden=GM.mode!=="ffa";$("ffa").dataset.key="";$("train").hidden=GM.mode!=="range";$("code").hidden=!NET.on;$("code").textContent=NET.on?"ONLINE · MATCH "+NET.code.toUpperCase():"";$("hud").hidden=false;$("menu").hidden=true;$("over").hidden=true;$("pause").hidden=true}
 function startMatch(){audio();saveCfg();GM.mode="range";GM.diff=S.diff;
  buildWorld(GM.mode==="range"?"range":S.map);clearEnts();fx.clear();
  player=newEnt({isPlayer:true,id:"me",name:"You",team:GM.mode==="ffa"?"ffa":"blue"});
@@ -518,7 +523,10 @@ function updateHUD(dt){const p=player,w=gun.w;$("hpnum").firstChild.nodeValue=Ma
  const moving=Math.hypot(p.vx||0,p.vz||0),spr=(w.spread+moving*w.move/6+bloom+(onGround?0:.05))*(1-adsT),gap=4+spr*innerHeight/ (2*Math.tan(cam.fov*Math.PI/360))*1;
  const xh=$("xh");xh.style.opacity=1-adsT;$("xl").style.left=(-gap-9)+"px";$("xr").style.left=gap+"px";$("xu").style.top=(-gap-9)+"px";$("xd").style.top=gap+"px";$("dot").style.display=adsT>.6?"block":"none";
  $("vig").style.opacity=Math.max(vig,p.hp<35?(35-p.hp)/60:0);
- if(GM.mode!=="range"&&hardcore()){const al=t=>ents.filter(e=>e.alive&&(t?e.team===t:true)).length;if(GM.mode==="tdm"){$("sb").textContent=al("blue");$("sr").textContent=al("red")}else{$("sb").textContent=p.alive?"ALIVE":"OUT";$("sr").textContent=al()}$("st").textContent="HARDCORE"}
+ if(GM.mode==="ffa"){const tl=Math.max(0,timeLeft),hc=hardcore(),rows=[...ents].sort((a,b)=>b.kills-a.kills||a.deaths-b.deaths).slice(0,12),
+   head=hc?"HARDCORE":isFinite(tl)?Math.floor(tl/60)+":"+String(Math.floor(tl%60)).padStart(2,"0"):"∞",key=head+"|"+rows.map(e=>e.id+e.name+e.kills+(e.alive?1:0)).join(",");
+  const box=$("ffa");if(box.dataset.key!==key){box.dataset.key=key;box.innerHTML=`<div class="h"><span>KILLS</span><span>${head}</span></div>`+rows.map(e=>`<div class="r${e===p?" me":""}${hc&&!e.alive?" out":""}"><span>${esc(e.name)}${e===p?" (you)":""}</span><b>${e.kills}</b></div>`).join("")}}
+ else if(GM.mode!=="range"&&hardcore()){const al=t=>ents.filter(e=>e.alive&&(t?e.team===t:true)).length;if(GM.mode==="tdm"){$("sb").textContent=al("blue");$("sr").textContent=al("red")}else{$("sb").textContent=p.alive?"ALIVE":"OUT";$("sr").textContent=al()}$("st").textContent="HARDCORE"}
  else if(GM.mode!=="range"){$("sb").textContent=GM.mode==="tdm"?score.blue:p.kills;const lead=GM.mode==="ffa"?Math.max(0,...ents.filter(e=>!e.isPlayer).map(e=>e.kills)):score.red;$("sr").textContent=lead;const tl=Math.max(0,timeLeft);$("st").textContent=isFinite(tl)?Math.floor(tl/60)+":"+String(Math.floor(tl%60)).padStart(2,"0"):"∞"}
  else $("train").innerHTML=`<b>FIRING RANGE</b><br>Shots <b>${trainStats.shots}</b> · Hits <b>${trainStats.hits}</b> · Accuracy <b>${trainStats.shots?Math.round(trainStats.hits/trainStats.shots*100):0}%</b><br>Last hit <b>${trainStats.last}</b><br>Infinite ammo <b>${S.inf?"ON":"OFF"}</b> · <kbd>I</kbd> toggle`;
  // damage numbers
