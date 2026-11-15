@@ -347,7 +347,7 @@ function newEnt(o){const e=Object.assign({hp:100,alive:true,kills:0,deaths:0,pos
 const S={mode:"tdm",map:"killhouse",diff:1,bots:7,botsB:3,botsR:4,pri:"m4",sec:"p12",skin:"matte",inf:true,sens:1,team:"blue",name:"",botDiff:1,vol:.8};
 try{Object.assign(S,JSON.parse(localStorage.getItem("bp_cfg")||"{}"))}catch(e){}
 if(!S.name)S.name="Operator-"+(100+rnd()*900|0);if(S.team!=="red")S.team="blue";
-const GAME_VERSION="v21";
+const GAME_VERSION="v22";
 const saveCfg=()=>{try{localStorage.setItem("bp_cfg",JSON.stringify(S))}catch(e){}};
 // GM = rules of the match being played (menu settings offline, the host's settings online)
 const GM={mode:"tdm",diff:1};
@@ -796,7 +796,7 @@ function renderOnline(){const st=$("oStat");if(!st)return;
  if(!NET.lobby){st.textContent="Connecting…";st.className="ostat";$("oHost").disabled=$("oJoin").disabled=true;return}
  const local=NET.via==="local";$("oJoinBox").hidden=local;$("oJoinBox").style.display=local?"none":"contents";$("oNote").hidden=!local;
  if(local){st.textContent="Offline · rooms are just you and bots";st.className="ostat"}
- else{const lob=NET.lobby.peers().filter(p=>p.kind==="viewer"),c=NET.lobby.connected();const dg=NET.diag?NET.diag():null;st.textContent=(c?`Online · ${lob.length} player${lob.length===1?"":"s"} here`:"Reconnecting…")+(dg?` · direct ${dg.direct?"ok":"blocked"} · relay ${dg.relay}/${dg.total}`:"")+" · "+GAME_VERSION;st.className="ostat"+(c?" ok":"")}
+ else{const lob=NET.lobby.peers().filter(p=>p.kind==="viewer"),c=NET.lobby.connected();const dg=NET.diag?NET.diag():null;st.textContent=(c?`Online · ${lob.length} player${lob.length===1?"":"s"} here`:"Reconnecting…");st.className="ostat"+(c?" ok":"")}
  $("oHost").disabled=NET.busy;$("oJoin").disabled=NET.busy||local}
 $("oName").value=S.name;$("oName").oninput=e=>{S.name=e.target.value.replace(/[\u0000-\u001f\u007f]/g,"").slice(0,16);saveCfg()};$("oName").onblur=e=>{if(!S.name.trim()){S.name="Operator-"+(100+rnd()*900|0);e.target.value=S.name;saveCfg()}};
 $("oHost").onclick=()=>{const code=Array.from({length:5},()=>"abcdefghjkmnpqrstuvwxyz23456789"[rnd()*31|0]).join("");netJoin(code,true)};
