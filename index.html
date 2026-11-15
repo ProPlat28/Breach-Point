@@ -342,7 +342,7 @@ function newEnt(o){const e=Object.assign({hp:100,alive:true,kills:0,deaths:0,pos
 const S={mode:"tdm",map:"killhouse",diff:1,bots:7,botsB:3,botsR:4,pri:"m4",sec:"p12",skin:"matte",inf:true,sens:1,team:"blue",name:"",botDiff:1,vol:.8};
 try{Object.assign(S,JSON.parse(localStorage.getItem("bp_cfg")||"{}"))}catch(e){}
 if(!S.name)S.name="Operator-"+(100+rnd()*900|0);if(S.team!=="red")S.team="blue";
-const GAME_VERSION="v19";
+const GAME_VERSION="v20";
 const saveCfg=()=>{try{localStorage.setItem("bp_cfg",JSON.stringify(S))}catch(e){}};
 // GM = rules of the match being played (menu settings offline, the host's settings online)
 const GM={mode:"tdm",diff:1};
@@ -732,16 +732,34 @@ function loadScript(src){return new Promise((res,rej)=>{const e=document.createE
 async function mqttRelay(){try{if(!window.mqtt)await loadScript("https://cdnjs.cloudflare.com/ajax/libs/mqtt/5.10.1/mqtt.min.js")}catch(e){return null}if(!window.mqtt||!mqtt.connect)return null;
  const subs=new Map(),clients=MQTT_URLS.map(u=>{let c;try{c=mqtt.connect(u,{clientId:"bp_"+Math.random().toString(36).slice(2,12),connectTimeout:8000,reconnectPeriod:5000,keepalive:30,clean:true})}catch(e){return null}
   c.on("connect",()=>{for(const t of subs.keys())c.subscribe(t)});c.on("message",(t,m)=>{const h=subs.get(t);if(!h)return;let o;try{o=JSON.parse(m.toString())}catch(e){return}h(o)});c.on("error",()=>{});return c}).filter(Boolean);
- return{up:()=>clients.some(c=>c.connected),n:()=>clients.filter(c=>c.connected).length,total:MQTT_URLS.length,sub(t,h){subs.set(t,h);for(const c of clients)if(c.connected)c.subscribe(t)},unsub(t){subs.delete(t);for(const c of clients)if(c.connected)c.unsubscribe(t)},
+ return{fast:80,up:()=>clients.some(c=>c.connected),n:()=>clients.filter(c=>c.connected).length,total:MQTT_URLS.length,sub(t,h){subs.set(t,h);for(const c of clients)if(c.connected)c.subscribe(t)},unsub(t){subs.delete(t);for(const c of clients)if(c.connected)c.unsubscribe(t)},
   pub(t,o){const str=JSON.stringify(o);for(const c of clients)if(c.connected)c.publish(t,str)}}}
-async function p2pLobby(){const[mod,turn,MQ]=await Promise.all([import("https://cdn.jsdelivr.net/npm/@trystero-p2p/nostr@0.26.0/+esm").catch(()=>null),relayServers(),mqttRelay()]);NET.relay=!!turn;
- if(!mod&&!MQ)throw new Error("no transport");
+// Second fallback relay through the Nostr servers (standard secure web port 443, open on almost every network).
+// Game data rides in short-lived signed events that the servers pass on live without storing them.
+async function nostrRelay(){let sc;try{sc=(await import("https://cdn.jsdelivr.net/npm/@noble/secp256k1@3.2.0/+esm")).schnorr}catch(e){return null}if(!sc||!sc.keygen||!crypto.subtle)return null;
+ const hex=b=>Array.from(b,x=>x.toString(16).padStart(2,"0")).join(""),{secretKey,publicKey}=sc.keygen(),pk=hex(publicKey),KIND=25333,subs=new Map(),socks=new Map();let slowUntil=0;
+ const req=(ws,t)=>{try{ws.send(JSON.stringify(["REQ","bp"+t.length+t.slice(-20),{kinds:[KIND],"#x":[t],since:Math.floor(Date.now()/1000)-5}]))}catch(e){}};
+ const open=u=>{let ws;try{ws=new WebSocket(u)}catch(e){return}socks.set(u,ws);
+  ws.onopen=()=>{for(const t of subs.keys())req(ws,t)};
+  ws.onmessage=m=>{let a;try{a=JSON.parse(m.data)}catch(e){return}if(!Array.isArray(a))return;
+   if(a[0]==="EVENT"&&a[2]&&Array.isArray(a[2].tags)){const tg=a[2].tags.find(x=>Array.isArray(x)&&x[0]==="x");const h=tg&&subs.get(tg[1]);if(!h||a[2].pubkey===pk)return;let o;try{o=JSON.parse(a[2].content)}catch(e){return}h(o)}
+   else if((a[0]==="OK"&&a[2]===false&&/rate|slow/i.test(String(a[3])))||(a[0]==="NOTICE"&&/rate|slow/i.test(String(a[1]))))slowUntil=Date.now()+30000};
+  ws.onclose=()=>{if(socks.get(u)===ws){socks.delete(u);setTimeout(()=>open(u),4000)}};ws.onerror=()=>{}};
+ for(const u of P2P_RELAYS)open(u);
+ const live=()=>[...socks.values()].filter(w=>w.readyState===1);
+ return{get fast(){return Date.now()<slowUntil?450:170},up:()=>live().length>0,n:()=>live().length,total:P2P_RELAYS.length,
+  sub(t,h){subs.set(t,h);for(const w of live())req(w,t)},unsub(t){subs.delete(t);for(const w of live())try{w.send(JSON.stringify(["CLOSE","bp"+t.length+t.slice(-20)]))}catch(e){}},
+  async pub(t,o){const ws=live();if(!ws.length)return;const ev={pubkey:pk,created_at:Math.floor(Date.now()/1000),kind:KIND,tags:[["x",t]],content:JSON.stringify(o)};
+   try{const id=new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(JSON.stringify([0,ev.pubkey,ev.created_at,ev.kind,ev.tags,ev.content]))));
+    const msg=JSON.stringify(["EVENT",{...ev,id:hex(id),sig:hex(await sc.signAsync(id,secretKey))}]);for(const w of ws)try{w.send(msg)}catch(e){}}catch(e){}}}}
+async function p2pLobby(){const[mod,turn,MQ,NR]=await Promise.all([import("https://cdn.jsdelivr.net/npm/@trystero-p2p/nostr@0.26.0/+esm").catch(()=>null),relayServers(),mqttRelay().catch(()=>null),nostrRelay().catch(()=>null)]);NET.relay=!!turn;
+ const RL=[MQ,NR].filter(Boolean);if(!mod&&!RL.length)throw new Error("no transport");
  const cfg={appId:"breach-point-fps-v2",relayConfig:{urls:P2P_RELAYS,warnOnRelayFailure:false},...(turn?{turnConfig:turn}:{})},me=mod?mod.selfId:"m"+Math.random().toString(36).slice(2,14);
  const relaysUp=()=>{if(!mod)return false;try{const so=mod.getRelaySockets?mod.getRelaySockets():{};return Object.values(so).some(w=>w&&w.readyState===1)}catch(e){return true}};
- const up=()=>relaysUp()||!!(MQ&&MQ.up());
- NET.diag=()=>({direct:relaysUp(),relay:MQ?MQ.n():0,total:MQTT_URLS.length});
+ const up=()=>relaysUp()||RL.some(r=>r.up());
+ NET.diag=()=>({direct:relaysUp(),relay:RL.reduce((a,r)=>a+r.n(),0),total:RL.reduce((a,r)=>a+r.total,0)});
  function mk(name){const room=mod?mod.joinRoom(cfg,name):null,act=room?room.makeAction("p"):{send(){}},peers=new Map(),subs=new Set(),p2p=new Set(),topic="breachpoint/v2/"+name;
-  let mine={},snap=null,left=false,pend=false,sendT=null,q=0,lastMq=0;
+  let mine={},snap=null,left=false,pend=false,sendT=null,q=0;const lastR=RL.map(()=>0);
   const peersNow=()=>{if(snap)return snap;const a=[{peer:me,by:null,isMe:true,sameTab:true,kind:"viewer",guest:false,presence:Object.freeze({...mine}),updatedAt:Date.now()}];for(const[id,p]of peers)a.push({peer:id,by:null,isMe:false,sameTab:false,kind:"viewer",guest:false,presence:p.presence,updatedAt:p.t});return snap=Object.freeze(a)};
   const notify=()=>{snap=null;if(pend||left)return;pend=true;setTimeout(()=>{pend=false;if(left)return;const ps=peersNow();for(const f of subs)try{f({peers:ps,joined:[],left:[],updated:[]})}catch(e){console.error(e)}},0)};
   const env=()=>({i:me,q:++q,d:JSON.parse(JSON.stringify(mine))});
@@ -750,15 +768,15 @@ async function p2pLobby(){const[mod,turn,MQ]=await Promise.all([import("https://
    if(o.bye){if(peers.delete(id))notify();return}const d=o.d;if(!d||typeof d!=="object"||Array.isArray(d))return;if(cur&&o.q<=cur.q)return;
    peers.set(id,{presence:Object.freeze(d),t:Date.now(),q:o.q});notify()};
   const flush=()=>{sendT=null;if(left)return;const e=env();try{act.send(e)}catch(x){}
-   if(MQ){const n=Date.now(),need=[...peers.keys()].some(id=>!p2p.has(id)),gap=need?80:peers.size?2000:1000;if(n-lastMq>=gap){lastMq=n;MQ.pub(topic,e)}}};
+   const n=Date.now(),need=[...peers.keys()].some(id=>!p2p.has(id));RL.forEach((r,k)=>{const gap=need?r.fast:peers.size?2000:1000;if(n-lastR[k]>=gap){lastR[k]=n;r.pub(topic,e)}})};
   act.onMessage=(o,{peerId})=>take(peerId,o);
-  if(MQ)MQ.sub(topic,o=>{if(!o||typeof o.i!=="string"||o.i===me||o.i.length>80)return;take(o.i,o)});
+  for(const r of RL)r.sub(topic,o=>{if(!o||typeof o.i!=="string"||o.i===me||o.i.length>80)return;take(o.i,o)});
   if(room){room.onPeerJoin=id=>{p2p.add(id);try{act.send(env(),{target:id})}catch(e){}};room.onPeerLeave=id=>{p2p.delete(id)}}
   const hb=setInterval(()=>{const n=Date.now();for(const[id,p]of peers)if(n-p.t>7000){peers.delete(id);notify()}flush()},1000);
   return{name,peers:peersNow,connected:up,
    presence(patch){for(const k in patch){if(patch[k]===null)delete mine[k];else mine[k]=patch[k]}if(!sendT)sendT=setTimeout(flush,30);notify();return Promise.resolve()},
    onPeers(f){subs.add(f);notify();return()=>subs.delete(f)},onConnection(f){let last=null;const t=setInterval(()=>{const c=up();if(c!==last){last=c;f(c)}},1000);return()=>clearInterval(t)},
-   leave(){if(left)return Promise.resolve();const bye={i:me,q:++q,bye:1};try{act.send(bye)}catch(e){}if(MQ){MQ.pub(topic,bye);MQ.unsub(topic)}left=true;clearInterval(hb);clearTimeout(sendT);try{room&&room.leave()}catch(e){}return Promise.resolve()},
+   leave(){if(left)return Promise.resolve();const bye={i:me,q:++q,bye:1};try{act.send(bye)}catch(e){}for(const r of RL){r.pub(topic,bye);r.unsub(topic)}left=true;clearInterval(hb);clearTimeout(sendT);try{room&&room.leave()}catch(e){}return Promise.resolve()},
    join:n=>Promise.resolve(mk(n))}}
  const lobby=mk("lobby"),t0=performance.now();
  while(!up()&&performance.now()-t0<10000)await sleep(250);
